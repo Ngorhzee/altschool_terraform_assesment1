@@ -11,7 +11,7 @@ resource "aws_vpc" "techcorp_vpc" {
 resource "aws_subnet" "public_subnets" {
   for_each = var.public_subnets
   vpc_id = aws_vpc.techcorp_vpc.id
-  cidr_block = cidrsubnet()
+  cidr_block = cidrsubnet(var.cidr,8,each.value)
   availability_zone = tolist(data.aws_availability_zones.available.names)[each.value]
   tags = {
     names = each.key
@@ -21,9 +21,113 @@ resource "aws_subnet" "public_subnets" {
 resource "aws_subnet" "private_subnets" {
   for_each = var.private_subnets
   vpc_id = aws_vpc.techcorp_vpc.id
-  cidr_block = cidrsubnet()
+  cidr_block = cidrsubnet(var.cidr,8,each.value+2)
   availability_zone = tolist(data.aws_availability_zones.available.names)[each.value]
   tags = {
     names = each.key
   }
+}
+
+resource "aws_internet_gateway" "techcorp_igw" {
+  vpc_id = aws_vpc.techcorp_vpc.id
+  tags = {
+    Name = "techcorp-igw"
+  }
+  
+}
+
+resource "aws_nat_gateway" "techcorp_nat_gw" {
+  depends_on = [ aws_internet_gateway.techcorp_igw ]
+  for_each = aws_subnet.public_subnets
+  subnet_id = each.value.id
+  tags = {
+    Name = "techcorp-nat"
+  }
+  
+}
+
+resource "aws_route_table" "public_rt" {
+  vpc_id = aws_vpc.techcorp_vpc.id
+  route = {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.techcorp_igw.id
+  }
+tags = {
+  Name = "public_route_table"
+}
+}
+resource "aws_route_table" "private_rt" {
+  vpc_id = aws_vpc.techcorp_vpc.id
+  route = {
+    cidr_block = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.techcorp_nat_gw.id
+  }
+tags = {
+  Name = "private_route_table"
+}
+}
+
+resource "aws_security_group" "bastion_sg" {
+  name        = "bastion-sg"
+  description = "Security group for bastion host"
+  ingress{
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
+    
+  }
+  vpc_id      = aws_vpc.techcorp_vpc.id
+}
+
+resource "aws_security_group" "web_server_sg" {
+  name        = "web-server-sg"
+  description = "Allow HTTP and SSH traffic"
+  vpc_id      = aws_vpc.techcorp_vpc.id
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+}
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+}
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    security_groups = [aws_security_group.bastion_sg.id]
+  }
+   egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+  tags = {
+   Name = "web_server_sg"
+  }
+}
+
+resource "aws_security_group" "database_sg" {
+  name = "database_sg"
+  description = "Allow MySQL (3306) only from web security group Allow SSH(22) from Bastion Security Group"
+  ingress{
+    from_port = 3306
+    to_port = 3306
+    protocol = "tcp"
+    security_groups = [aws_security_group.web_server_sg.id]
+  }
+  ingress {
+    from_port = 22
+    to_port = 22
+    protocol = "tcp"
+    security_groups = [aws_security_group.bastion_sg.id]
+  }
+  
 }

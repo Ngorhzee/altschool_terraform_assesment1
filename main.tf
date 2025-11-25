@@ -1,4 +1,18 @@
 data "aws_availability_zones" "available" {}
+data "aws_ami" "amazon_linux" {
+  most_recent = true
+  owners      = ["amazon"]
+  filter {
+    name   = "architecture"
+    values = ["arm64"]
+  }
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023*"]
+  }
+}
+
+
 resource "aws_vpc" "techcorp_vpc" {
   cidr_block = var.cidr
   tags = {
@@ -36,19 +50,28 @@ resource "aws_internet_gateway" "techcorp_igw" {
   
 }
 
+resource "aws_eip" "techcorp_nat_eip" {
+  for_each = aws_subnet.public_subnets
+  depends_on = [ aws_internet_gateway.techcorp_igw ]
+  tags = {
+    Name = "techcorp-eip-${each.key}"
+  }
+  
+}
 resource "aws_nat_gateway" "techcorp_nat_gw" {
   depends_on = [ aws_internet_gateway.techcorp_igw ]
   for_each = aws_subnet.public_subnets
   subnet_id = each.value.id
+  allocation_id = aws_eip.techcorp_nat_eip[each.key].id
   tags = {
-    Name = "techcorp-nat"
+    Name = "techcorp-nat-${each.key}"
   }
   
 }
 
 resource "aws_route_table" "public_rt" {
   vpc_id = aws_vpc.techcorp_vpc.id
-  route = {
+  route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.techcorp_igw.id
   }
@@ -56,11 +79,25 @@ tags = {
   Name = "public_route_table"
 }
 }
+resource "aws_route_table_association" "public_rt_assoc" {
+  route_table_id = aws_route_table.public_rt[each.key].id
+  depends_on = [ aws_subnet.public_subnets]
+  for_each = aws_subnet.public_subnets
+  subnet_id = each.value.id
+}
+
+resource "aws_route_table_association" "private_rt_assoc" {
+  route_table_id = aws_route_table.private_rt[each.key].id
+  depends_on = [ aws_subnet.private_subnets]
+  for_each = aws_subnet.private_subnets
+  subnet_id = each.value.id
+}
 resource "aws_route_table" "private_rt" {
   vpc_id = aws_vpc.techcorp_vpc.id
-  route = {
+for_each = aws_nat_gateway.techcorp_nat_gw
+  route {
     cidr_block = "0.0.0.0/0"
-    nat_gateway_id = aws_nat_gateway.techcorp_nat_gw.id
+    nat_gateway_id = aws_nat_gateway.techcorp_nat_gw[each.key].id
   }
 tags = {
   Name = "private_route_table"
@@ -74,7 +111,7 @@ resource "aws_security_group" "bastion_sg" {
     from_port = 22
     to_port = 22
     protocol = "tcp"
-    
+
   }
   vpc_id      = aws_vpc.techcorp_vpc.id
 }
@@ -130,4 +167,32 @@ resource "aws_security_group" "database_sg" {
     security_groups = [aws_security_group.bastion_sg.id]
   }
   
+}
+
+resource "aws_instance" "baston_host" {
+  ami = data.aws_ami.amazon_linux.id
+  instance_type = "t3.mirco"
+  associate_public_ip_address = true
+  subnet_id = aws_subnet.public_subnets["techcorp-public-subnet-1"].id
+  tags = {
+    Name = "baston_host"
+  }
+  
+}
+resource "aws_instance" "web_server" {
+  for_each = aws_subnet.private_subnets
+  ami = data.aws_ami.amazon_linux.id
+  instance_type = "t3.mirco"
+  subnet_id = each.value.id
+  tags = {
+    Name = "web_server${each.key}"
+  }
+}
+resource "aws_instance" "database_server" {
+  ami = data.aws_ami.amazon_linux.id
+  instance_type = "t3.small"
+  subnet_id = aws_subnet.private_subnets["techcorp-private-subnet-1"].id
+  tags = {
+    Name = "database_server"
+  }
 }

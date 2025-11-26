@@ -1,0 +1,5 @@
+Outputs:
+
+bastion_public_ip = "52.72.249.119"
+load_balancer_dns_name = "techcorp-alb-171583336.us-east-1.elb.amazonaws.com"
+vpc_id = "vpc-08d49324a6402894a"

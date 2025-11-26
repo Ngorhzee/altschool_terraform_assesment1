@@ -1,4 +1,4 @@
 key_pair_name         = "my_key"
-my_ip              = "107.12.56.987/32"
-ssh_username          = "techcorpuser"
-ssh_password          = "Tech2025!"
+my_ip              = ""
+ssh_username          = ""
+ssh_password          = ""
